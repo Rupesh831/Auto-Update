@@ -1,53 +1,38 @@
-from flask import Flask, jsonify, send_from_directory, abort, render_template_string, request
-from werkzeug.utils import secure_filename
+from flask import Flask, jsonify, send_from_directory, abort, render_template_string
 import os
 import re
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
-
-UPLOAD_FOLDER = '.'
-ALLOWED_EXTENSIONS = {'exe'}
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_latest_tracker():
-    """Auto-detect latest tracker_vX.X.exe."""
-    tracker_files = []
-    try:
-        for f in os.listdir(UPLOAD_FOLDER):
-            if f.endswith('.exe') and re.match(r'tracker_v\d+\.\d+\.exe', f, re.IGNORECASE):
-                version_match = re.search(r'v(\d+\.\d+)', f)
-                if version_match:
-                    version = float(version_match.group(1))
-                    tracker_files.append((f, version))
-    except:
-        pass
-    if tracker_files:
-        return max(tracker_files, key=lambda x: x[1])
-    return None, 0.0
+    """Get from ENV vars or detect files."""
+    # Render ENV vars (set in Render Dashboard)
+    server_filename = os.environ.get('LATEST_TRACKER', '')
+    server_version = float(os.environ.get('LATEST_VERSION', '0.0'))
+    
+    # Fallback to file detection
+    if not server_filename:
+        tracker_files = []
+        try:
+            for f in os.listdir('.'):
+                if f.endswith('.exe') and re.match(r'tracker_v\d+\.\d+\.exe', f, re.IGNORECASE):
+                    version_match = re.search(r'v(\d+\.\d+)', f)
+                    if version_match:
+                        version = float(version_match.group(1))
+                        tracker_files.append((f, version))
+            if tracker_files:
+                latest = max(tracker_files, key=lambda x: x[1])
+                return latest[0], latest[1]
+        except:
+            pass
+    return server_filename, server_version
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
     filename, version = get_latest_tracker()
-    
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            return render_template_string(HTML_TEMPLATE, filename=filename or 'None', 
-                                        version=version, message="No file selected", files=[])
-        file = request.files['file']
-        if file.filename == '':
-            return render_template_string(HTML_TEMPLATE, filename=filename or 'None', 
-                                        version=version, message="No file selected", files=[])
-        if file and allowed_file(file.filename):
-            filename_secure = secure_filename(file.filename)
-            file.save(os.path.join(UPLOAD_FOLDER, filename_secure))
-            return render_template_string(HTML_TEMPLATE, filename=filename_secure, 
-                                        version=version, message="✅ Uploaded successfully!", 
-                                        files=[f for f in os.listdir('.') if f.endswith('.exe')])
-    return render_template_string(HTML_TEMPLATE, filename=filename or 'None', version=version, 
-                                message="", files=[f for f in os.listdir('.') if f.endswith('.exe')])
+    files = [f for f in os.listdir('.') if f.endswith('.exe')]
+    return render_template_string(HTML_TEMPLATE, filename=filename or 'None', 
+                                version=version, files=files)
 
 @app.route('/version')
 def version():
@@ -67,31 +52,28 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head><title>Tracker Server</title>
-<style>
-body{font-family:Arial;max-width:800px;margin:50px auto;padding:20px;background:#f5f5f5;}
+<style>body{font-family:Arial;max-width:800px;margin:50px auto;padding:20px;background:#f5f5f5;}
 .card{background:white;padding:30px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.1);}
 .version{color:#2196F3;font-size:28px;font-weight:bold;}
-.upload-form{margin:20px 0;}
-input[type=file]{padding:10px;margin:10px 0;}
-button{padding:12px 24px;background:#4CAF50;color:white;border:none;border-radius:5px;cursor:pointer;font-size:16px;}
 .files{list-style:none;padding:0;}
 .files li{margin:10px 0;padding:15px;background:#e3f2fd;border-radius:5px;}
 a{display:inline-block;padding:10px 20px;background:#2196F3;color:white;text-decoration:none;border-radius:5px;margin:5px;}
-.message{color:#4CAF50;font-weight:bold;padding:10px;background:#e8f5e8;border-radius:5px;}
+.env-info{background:#fff3cd;padding:15px;border-radius:5px;border-left:4px solid #ffc107;}
 </style>
 </head>
 <body>
 <div class="card">
     <h1>🚀 Tracker Update Server</h1>
     <div class="version">Latest: {{filename}} (v{{version}})</div>
-    {% if message %}<div class="message">{{message}}</div>{% endif %}
     
-    <form method="post" enctype="multipart/form-data" class="upload-form">
-        <input type="file" name="file" accept=".exe" required>
-        <button type="submit">📤 Upload New Tracker</button>
-    </form>
+    <div class="env-info">
+        <strong>📋 Render Setup:</strong><br>
+        Add ENV vars in Render Dashboard:<br>
+        <code>LATEST_TRACKER=tracker_v1.5.exe</code><br>
+        <code>LATEST_VERSION=1.5</code>
+    </div>
     
-    <h3>All EXE Files:</h3>
+    <h3>Available Files:</h3>
     <ul class="files">
     {% for f in files %}
         <li>{{f}} {% if f == filename %}<span style="color:green;">✓ LATEST</span>{% endif %}</li>
